@@ -6,6 +6,7 @@ import { BmsButton, BmsCard, BmsPageShell, BmsSectionHeader } from "@/components
 import { BuildingPerformanceControls } from "./BuildingPerformanceControls";
 import { BuildingPerformanceSummary } from "./BuildingPerformanceSummary";
 import { BuildingPerformanceReadiness } from "./BuildingPerformanceReadiness";
+import { BuildingPerformanceCharts } from "./BuildingPerformanceCharts";
 import { useBuildingPerformanceReport } from "./useBuildingPerformanceReport";
 
 type BuildingPerformancePageProps = {
@@ -53,6 +54,13 @@ function SiteBuildingPerformancePage({
       <BuildingPerformanceControls applied={report.applied} onLoad={report.load} />
       <BuildingPerformanceSummary state={report.summary} requested={report.applied !== null} onRetry={report.retrySummary} />
       <BuildingPerformanceReadiness state={report.readiness} requested={report.applied !== null} onRetry={report.retryReadiness} />
+      {report.applied && (
+        <BuildingPerformanceCharts
+          key={JSON.stringify([siteId, report.applied])}
+          siteId={siteId}
+          applied={report.applied}
+        />
+      )}
     </BmsPageShell>
   );
 }
