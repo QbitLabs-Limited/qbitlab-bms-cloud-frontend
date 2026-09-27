@@ -1,3 +1,5 @@
+import { BuildingPerformancePrint } from "./BuildingPerformancePrint";
+import type { ChartReportData, ConfigurationReportData, BuildingPerformanceReportSnapshot } from "./buildingPerformanceReport.types";
 import { useRef, useState } from "react";
 import type { BuildingPerformanceRatingScope } from "@/types/buildingPerformance";
 import { BuildingPerformanceConfiguration } from "./BuildingPerformanceConfiguration";
@@ -30,6 +32,15 @@ function SiteBuildingPerformancePage({
 }: BuildingPerformancePageProps) {
   const navigate = useNavigate();
   const report = useBuildingPerformanceReport(siteId);
+  const [chartReportData, setChartReportData] = useState<ChartReportData | null>(null);
+  const [configurationReportData, setConfigurationReportData] = useState<ConfigurationReportData | null>(null);
+  const matchingCharts = chartReportData?.siteId === siteId && chartReportData.appliedKey === JSON.stringify(report.applied) ? chartReportData : null;
+  const matchingConfiguration = configurationReportData?.siteId === siteId && configurationReportData.scope === report.applied?.ratingScope ? configurationReportData : null;
+  const printDisabled = !report.applied || (!report.summary.data && !report.readiness.data) || report.summary.loading || report.readiness.loading || !!configurationReportData?.busy || !!matchingConfiguration?.loading || !!(matchingCharts?.monthly.loading || matchingCharts?.annual.loading || matchingCharts?.breakdown.loading);
+  function captureReport(): BuildingPerformanceReportSnapshot {
+    if (!report.applied) throw new Error("Load reporting data before printing.");
+    return { siteId, siteName, generatedAt: new Date().toISOString(), applied: report.applied, summary: report.summary, readiness: report.readiness, charts: matchingCharts, configuration: matchingConfiguration };
+  }
   const latestReport = useRef(report);
   latestReport.current = report;
   const [configurationChange, setConfigurationChange] = useState<{ scope: BuildingPerformanceRatingScope; revision: number } | null>(null);
@@ -62,7 +73,8 @@ function SiteBuildingPerformancePage({
           <p className="mt-1 text-xs text-slate-400">Site ID: {siteId}</p>
         )}
       </BmsCard>
-      <BuildingPerformanceConfiguration siteId={siteId} onChanged={configurationChanged} />
+      <BuildingPerformancePrint disabled={printDisabled} capture={captureReport} />
+      <BuildingPerformanceConfiguration siteId={siteId} onChanged={configurationChanged} onReportData={setConfigurationReportData} />
       <BuildingPerformanceControls applied={report.applied} onLoad={report.load} />
       <BuildingPerformanceSummary state={report.summary} requested={report.applied !== null} onRetry={report.retrySummary} />
       <BuildingPerformanceReadiness state={report.readiness} requested={report.applied !== null} onRetry={report.retryReadiness} />
@@ -72,6 +84,7 @@ function SiteBuildingPerformancePage({
           siteId={siteId}
           applied={report.applied}
           configurationChange={configurationChange}
+          onReportData={setChartReportData}
         />
       )}
     </BmsPageShell>

@@ -1,4 +1,5 @@
-import { useState } from "react";
+import type { ConfigurationReportData } from "./buildingPerformanceReport.types";
+import { useEffect, useState } from "react";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { BuildingPerformanceApi } from "@/api/buildingPerformance";
 import { BmsButton, BmsCard, BmsSectionHeader, BmsSelect } from "@/components/UI";
@@ -9,8 +10,8 @@ import { BuildingPerformanceMeterAssignmentForm } from "./BuildingPerformanceMet
 import { BuildingPerformanceMeterAssignments } from "./BuildingPerformanceMeterAssignments";
 import { formatMetric } from "./buildingPerformanceUi";
 
-type Props = { siteId: string; onChanged: (scope: BuildingPerformanceRatingScope) => void };
-export function BuildingPerformanceConfiguration({ siteId, onChanged }: Props) {
+type Props = { onReportData?: (data: ConfigurationReportData | null) => void; siteId: string; onChanged: (scope: BuildingPerformanceRatingScope) => void };
+export function BuildingPerformanceConfiguration({ siteId, onChanged, onReportData }: Props) {
   const user = useCurrentUser();
   const canWrite = (user?.roles ?? []).some(role => ["ADMIN", "BMS_ADMIN", "SITE_MANAGER", "FACILITY_MANAGER"].includes(role.replace(/^ROLE_/, "").toUpperCase()));
   const [scope, setScope] = useState<BuildingPerformanceRatingScope | "">("");
@@ -19,11 +20,15 @@ export function BuildingPerformanceConfiguration({ siteId, onChanged }: Props) {
     <BmsSectionHeader title="Building Performance configuration" subtitle="Configuration scope is independent of the applied reporting scope." />
     <BmsSelect label="Configuration rating scope" value={scope} disabled={busy} onChange={e => setScope(e.target.value as BuildingPerformanceRatingScope | "")}><option value="">Select configuration scope</option>{["BASE_BUILDING", "TENANCY", "WHOLE_BUILDING"].map(value => <option key={value} value={value}>{value}</option>)}</BmsSelect>
     {!canWrite && <p className="text-sm text-slate-400">Read-only configuration. Write controls require confirmed management permissions.</p>}
-    {scope && <ScopeConfiguration key={`${siteId}:${scope}`} siteId={siteId} scope={scope} canWrite={canWrite} onChanged={onChanged} onBusy={setBusy} />}
+    {scope && <ScopeConfiguration key={`${siteId}:${scope}`} siteId={siteId} scope={scope} canWrite={canWrite} onChanged={onChanged} onBusy={setBusy} onReportData={onReportData} />}
   </BmsCard>;
 }
-function ScopeConfiguration({ siteId, scope, canWrite, onChanged, onBusy }: Props & { scope: BuildingPerformanceRatingScope; canWrite: boolean; onBusy: (value: boolean) => void }) {
+function ScopeConfiguration({ siteId, scope, canWrite, onChanged, onBusy, onReportData }: Props & { scope: BuildingPerformanceRatingScope; canWrite: boolean; onBusy: (value: boolean) => void }) {
   const configuration = useBuildingPerformanceConfiguration(siteId, scope, canWrite, onChanged);
+  useEffect(() => {
+    onReportData?.({ siteId, scope, profile: configuration.profile, assignments: configuration.assignments, loading: configuration.loading, busy: configuration.busy, missing: configuration.missing, error: configuration.error, assignmentError: configuration.assignmentError });
+  }, [siteId, scope, onReportData, configuration.profile, configuration.assignments, configuration.loading, configuration.busy, configuration.missing, configuration.error, configuration.assignmentError]);
+  useEffect(() => () => onReportData?.(null), [onReportData]);
   const [profileOpen, setProfileOpen] = useState(false);
   const [editor, setEditor] = useState<{ assignment: BuildingPerformanceMeterAssignmentResponse | null } | null>(null);
   async function mutate(action: () => Promise<unknown>) {

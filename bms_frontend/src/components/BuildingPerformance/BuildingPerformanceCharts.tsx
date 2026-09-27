@@ -1,4 +1,5 @@
-import { useState, type FormEvent, type ReactNode } from "react";
+import type { ChartReportData } from "./buildingPerformanceReport.types";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { BmsButton, BmsCard, BmsInput, BmsSectionHeader, BmsSelect } from "@/components/UI";
 import type { BuildingPerformanceSummaryQuery, BuildingPerformanceEnergyBreakdownQuery, BuildingPerformancePeriodType, BuildingPerformanceRatingScope } from "@/types/buildingPerformance";
 import { useBuildingPerformanceCharts } from "./useBuildingPerformanceCharts";
@@ -6,7 +7,7 @@ import { BuildingPerformanceTrendChart } from "./BuildingPerformanceTrendChart";
 import { BuildingPerformanceBreakdownChart } from "./BuildingPerformanceBreakdownChart";
 import { rangeError, validPeriod, type TrendPeriod } from "./buildingPerformanceChartData";
 
-type Props = { siteId: string; applied: BuildingPerformanceSummaryQuery; configurationChange?: { scope: BuildingPerformanceRatingScope; revision: number } | null };
+type Props = { onReportData?: (data: ChartReportData | null) => void; siteId: string; applied: BuildingPerformanceSummaryQuery; configurationChange?: { scope: BuildingPerformanceRatingScope; revision: number } | null };
 
 function RangeControls({ kind, onLoad }: { kind: TrendPeriod; onLoad: (from: string, to: string) => void }) {
   const [from, setFrom] = useState("");
@@ -36,8 +37,13 @@ function ChartState({ loading, error, requested, hasData, retry, children }: { l
   return <>{children}</>;
 }
 
-export function BuildingPerformanceCharts({ siteId, applied, configurationChange }: Props) {
+export function BuildingPerformanceCharts({ siteId, applied, configurationChange, onReportData }: Props) {
   const charts = useBuildingPerformanceCharts(siteId, configurationChange);
+  useEffect(() => {
+    const section = <T, Q,>(value: { data: T | null; query: Q | null; loading: boolean; error: string | null }) => ({ data: value.data, query: value.query, loading: value.loading, error: value.error });
+    onReportData?.({ siteId, appliedKey: JSON.stringify(applied), monthly: section(charts.monthly), annual: section(charts.annual), breakdown: section(charts.breakdown) });
+  }, [siteId, applied, onReportData, charts.monthly.data, charts.monthly.query, charts.monthly.loading, charts.monthly.error, charts.annual.data, charts.annual.query, charts.annual.loading, charts.annual.error, charts.breakdown.data, charts.breakdown.query, charts.breakdown.loading, charts.breakdown.error]);
+  useEffect(() => () => onReportData?.(null), [onReportData]);
   const [periodType, setPeriodType] = useState<BuildingPerformancePeriodType>("ROLLING_12_MONTH");
   const [month, setMonth] = useState("");
   const [year, setYear] = useState("");
