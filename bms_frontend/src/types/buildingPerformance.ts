@@ -6,6 +6,7 @@ export type BuildingPerformanceRatingScope =
 
 export type BuildingPerformanceTimestampInterpretation = "UTC" | "SITE_LOCAL";
 
+/** Suggested known categories only; the API also accepts other category strings. */
 export type BuildingPerformanceConsumptionCategory =
   | "MAIN"
   | "HVAC"
@@ -26,9 +27,9 @@ export type BuildingPerformanceScopeQuery = {
 };
 
 export type BuildingPerformanceCalculationQuery = BuildingPerformanceScopeQuery & {
-  timestampInterpretation?: BuildingPerformanceTimestampInterpretation;
+  timestampInterpretation: BuildingPerformanceTimestampInterpretation;
   /** ISO-8601 duration, e.g. PT15M or PT1H; no frontend default. */
-  maxGap?: string;
+  maxGap: string;
 };
 
 export type BuildingPerformanceSummaryQuery = BuildingPerformanceCalculationQuery & {
@@ -59,8 +60,79 @@ export type BuildingPerformanceEnergyBreakdownQuery =
     | { periodType: "ROLLING_12_MONTH"; endingMonth: string; month?: never; year?: never }
   );
 
-/** Nested detail contracts are not yet confirmed; preserve their wire values. */
-export type BuildingPerformanceCategories = Record<string, unknown>;
+export type TotalSource = "MAIN_METERS" | "CATEGORY_METERS" | "NO_INCLUDED_METERS";
+
+export type QualityIssue =
+  | "NO_INCLUDED_METERS"
+  | "NO_TELEMETRY"
+  | "NO_VALID_INTERVALS"
+  | "INCOMPLETE_COVERAGE"
+  | "UNCOVERED_START"
+  | "UNCOVERED_END"
+  | "GAP_EXCEEDS_MAXIMUM"
+  | "COUNTER_RESET"
+  | "INVALID_READING"
+  | "CONFLICTING_TIMESTAMP"
+  | "NON_INCREASING_TIMESTAMP"
+  | "FUTURE_PERIOD"
+  | "SITE_LOCAL_TIMESTAMPS";
+
+export type CategoryResult = {
+  energyKwh: number | null;
+  dataCoveragePercent: number;
+};
+
+export type MeterResult = {
+  energyMeterId: string;
+  category: string;
+  allocationPercent: number;
+  energyKwh: number | null;
+  dataCoveragePercent: number;
+  resetCount: number;
+  qualityIssues: QualityIssue[];
+};
+
+export type BuildingPerformanceCategories = Record<string, CategoryResult>;
+
+export type EnergyConsumptionAggregationResult = {
+  totalEnergyKwh: number | null;
+  dataCoveragePercent: number;
+  totalSource: TotalSource;
+  categories: BuildingPerformanceCategories;
+  meters: MeterResult[];
+  qualityIssues: QualityIssue[];
+};
+
+export type BuildingPerformanceRatingStatus = "READY" | "NOT_READY" | "INSUFFICIENT_DATA";
+export type Completeness = "COMPLETE" | "PARTIAL" | "UNAVAILABLE";
+export type Outcome = "PASS" | "FAIL" | "WARNING" | "NOT_APPLICABLE" | "NOT_EVALUATED";
+export type Blocking = "NONE" | "CONFIGURATION" | "DATA";
+
+export type Requirement = {
+  code: string;
+  field: string;
+  outcome: Outcome;
+  blocking: Blocking;
+  reason: string;
+  energyMeterId: string | null;
+};
+
+export type Limitation = {
+  code: string;
+  reason: string;
+};
+
+export type Policy = {
+  id: string;
+  optionsSource: string;
+  completenessRule: string;
+  meaning: string;
+};
+
+export type MeterReadiness = MeterResult & {
+  energyCompleteness: Completeness;
+  gapFlags: QualityIssue[];
+};
 
 export type BuildingPerformanceResult = {
   tenantId: string;
@@ -78,14 +150,7 @@ export type BuildingPerformanceResult = {
     /** ISO-8601 duration */
     maxGap: string;
   };
-  consumption: {
-    totalEnergyKwh: number | null;
-    dataCoveragePercent: number;
-    totalSource: string;
-    categories: BuildingPerformanceCategories;
-    meters: unknown[];
-    qualityIssues: unknown[];
-  };
+  consumption: EnergyConsumptionAggregationResult;
   rentableAreaM2: number;
   energyIntensityKwhPerM2: number | null;
   targetRating: number | null;
@@ -95,23 +160,34 @@ export type BuildingPerformanceResult = {
 export type BuildingPerformanceRatingResponse = {
   tenantId: string;
   siteId: string;
-  profileId: string;
+  profileId: string | null;
   ratingScope: BuildingPerformanceRatingScope;
   periodType: "ROLLING_12_MONTH";
   periodStart: string;
+  /** Exclusive period boundary, YYYY-MM-DD. */
   periodEnd: string;
-  siteTimezone: string;
+  siteTimezone: string | null;
   timestampInterpretation: BuildingPerformanceTimestampInterpretation;
   /** ISO-8601 duration */
   maxGap: string;
+  /** Backend-provided label; currently "QbitLabs Data Readiness". */
   label: string;
-  status: string;
+  status: BuildingPerformanceRatingStatus;
   reason: string | null;
+  /** Currently always null, including when readiness status is READY. */
   estimatedRating: number | null;
   targetRating: number | null;
   energyIntensityKwhPerM2: number | null;
-  dataCoveragePercent: number;
-  qualityIssues: unknown[];
+  dataCoveragePercent: number | null;
+  qualityIssues: QualityIssue[];
+  readinessPolicy: Policy;
+  energyCompleteness: Completeness;
+  totalEnergyKwh: number | null;
+  totalSource: TotalSource | null;
+  gapFlags: QualityIssue[];
+  meters: MeterReadiness[];
+  requirements: Requirement[];
+  limitations: Limitation[];
 };
 
 export type BuildingPerformanceEnergyBreakdownResponse = {
@@ -127,10 +203,10 @@ export type BuildingPerformanceEnergyBreakdownResponse = {
   /** ISO-8601 duration */
   maxGap: string;
   totalEnergyKwh: number | null;
-  totalSource: string;
+  totalSource: TotalSource;
   categories: BuildingPerformanceCategories;
   dataCoveragePercent: number;
-  qualityIssues: unknown[];
+  qualityIssues: QualityIssue[];
 };
 
 export type BuildingPerformanceProfileRequest = {
@@ -153,7 +229,7 @@ export type BuildingPerformanceProfileResponse = BuildingPerformanceProfileReque
 
 export type BuildingPerformanceMeterAssignmentRequest = {
   energyMeterId: string;
-  consumptionCategory: BuildingPerformanceConsumptionCategory;
+  consumptionCategory: string;
   included: boolean;
   allocationPercent: number;
   notes: string | null;

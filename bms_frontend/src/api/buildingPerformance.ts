@@ -26,10 +26,8 @@ function scopeParams(query: BuildingPerformanceScopeQuery): URLSearchParams {
 
 function calculationParams(query: BuildingPerformanceCalculationQuery): URLSearchParams {
   const params = scopeParams(query);
-  if (query.timestampInterpretation !== undefined) {
-    params.set("timestampInterpretation", query.timestampInterpretation);
-  }
-  if (query.maxGap !== undefined) params.set("maxGap", query.maxGap);
+  params.set("timestampInterpretation", query.timestampInterpretation);
+  params.set("maxGap", query.maxGap);
   return params;
 }
 

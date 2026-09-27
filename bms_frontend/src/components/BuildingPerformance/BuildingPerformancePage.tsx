@@ -1,5 +1,6 @@
 import { ArrowLeft } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { keycloak } from "@/keycloak";
 import { BmsButton, BmsCard, BmsPageShell, BmsSectionHeader } from "@/components/UI";
 
 type BuildingPerformancePageProps = {
@@ -14,16 +15,23 @@ export function BuildingPerformancePage({
   siteName,
 }: BuildingPerformancePageProps) {
   const navigate = useNavigate();
+  const canViewSites = ["ADMIN", "BMS_ADMIN", "TECHNICIAN"].some((role) =>
+    keycloak.hasRealmRole(role)
+  );
+  const backAction = canViewSites
+    ? { label: "Back to Sites", path: `/user/tenants/${encodeURIComponent(tenantId)}/sites` }
+    : keycloak.hasRealmRole("SITE_MANAGER")
+      ? { label: "Back to Dashboard", path: "/dashboard" }
+      : null;
 
   return (
     <BmsPageShell contentClassName="space-y-6">
-      <BmsButton
-        variant="ghost"
-        onClick={() => navigate(`/user/tenants/${encodeURIComponent(tenantId)}/sites`)}
-      >
-        <ArrowLeft className="h-4 w-4" />
-        Back to Sites
-      </BmsButton>
+      {backAction && (
+        <BmsButton variant="ghost" onClick={() => navigate(backAction.path)}>
+          <ArrowLeft className="h-4 w-4" />
+          {backAction.label}
+        </BmsButton>
+      )}
       <BmsCard variant="section" className="p-6">
         <BmsSectionHeader title="Building Performance" subtitle="NABERSNZ" />
         <p className="text-sm text-slate-200">{siteName?.trim() || siteId}</p>

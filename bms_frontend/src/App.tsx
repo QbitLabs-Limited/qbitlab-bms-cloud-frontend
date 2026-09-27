@@ -419,7 +419,7 @@ const AppRoutes: FC = () => {
         path="/tenants/:tenantId/sites/:siteId/building-performance"
         element={
           <ProtectedRoute
-            allowedRoles={["ADMIN", "BMS_ADMIN", "SITE_MANAGER", "TECHNICIAN"]}
+            allowedRoles={["ADMIN", "BMS_ADMIN", "SITE_MANAGER", "FACILITY_MANAGER", "TECHNICIAN"]}
           >
             <BuildingPerformanceRoute />
           </ProtectedRoute>
