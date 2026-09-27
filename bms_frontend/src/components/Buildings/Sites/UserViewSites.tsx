@@ -108,6 +108,15 @@ export default function UserViewSites() {
     });
   }
 
+  function handleBuildingPerformance(siteId: string, siteName?: string) {
+    if (!tenantId || !siteId) return;
+
+    navigate(
+      `/tenants/${encodeURIComponent(tenantId)}/sites/${encodeURIComponent(siteId)}/building-performance`,
+      { state: { siteName } }
+    );
+  }
+
   function handleComplianceReport(siteId: string) {
     if (!tenantId || !siteId) return;
 
@@ -348,6 +357,14 @@ export default function UserViewSites() {
                           >
                             <FileCheck2 className="h-4 w-4" />
                             Compliance Report
+                          </BmsButton>
+                          <BmsButton
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => handleBuildingPerformance(siteId, site.siteName)}
+                          >
+                            <Building2 className="h-4 w-4" />
+                            Building Performance
                           </BmsButton>
                         </div>
                       </div>

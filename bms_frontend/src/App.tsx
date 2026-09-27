@@ -52,6 +52,8 @@ import { HvacFaultMappingRoute } from "./components/HvacFaults/HvacFaultMappingR
 import { HvacFaultAlarmsRoute } from "./components/HvacFaults/HvacFaultAlarmsRoute";
 import { ContinuousCommissioningRoute } from "./components/continuousCommissioning/ContinuousCommissioningRoute";
 
+import { BuildingPerformanceRoute } from "./components/BuildingPerformance/BuildingPerformanceRoute";
+
 const AppRoutes: FC = () => {
   const navigate = useNavigate();
 
@@ -409,6 +411,17 @@ const AppRoutes: FC = () => {
             allowedRoles={["ADMIN", "BMS_ADMIN", "SITE_MANAGER"]}
           >
             <HvacFaultMappingRoute />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/tenants/:tenantId/sites/:siteId/building-performance"
+        element={
+          <ProtectedRoute
+            allowedRoles={["ADMIN", "BMS_ADMIN", "SITE_MANAGER", "TECHNICIAN"]}
+          >
+            <BuildingPerformanceRoute />
           </ProtectedRoute>
         }
       />
