@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { BuildingPerformanceApi } from "@/api/buildingPerformance";
-import type { BuildingPerformanceMonthlyQuery, BuildingPerformanceAnnualQuery, BuildingPerformanceEnergyBreakdownQuery } from "@/types/buildingPerformance";
+import type { BuildingPerformanceMonthlyQuery, BuildingPerformanceAnnualQuery, BuildingPerformanceEnergyBreakdownQuery, BuildingPerformanceRatingScope } from "@/types/buildingPerformance";
 import { reportError } from "./buildingPerformanceUi";
 
-function useChartRequest<Q, T>(request: (siteId: string, query: Q) => Promise<T>, siteId: string) {
+type ConfigurationChange = { scope: BuildingPerformanceRatingScope; revision: number };
+
+function useChartRequest<Q extends { ratingScope: BuildingPerformanceRatingScope }, T>(request: (siteId: string, query: Q) => Promise<T>, siteId: string, configurationChange?: ConfigurationChange | null) {
   const [state, setState] = useState<{ loading: boolean; error: string | null; data: T | null; query: Q | null }>({ loading: false, error: null, data: null, query: null });
   const sequence = useRef(0);
   const mounted = useRef(true);
@@ -22,12 +24,21 @@ function useChartRequest<Q, T>(request: (siteId: string, query: Q) => Promise<T>
       if (mounted.current && id === sequence.current) setState({ loading: false, error: reportError(error), data: null, query: snapshot });
     }
   }
+  const latest = useRef({ query: state.query, load });
+  latest.current = { query: state.query, load };
+  const seenRevision = useRef(configurationChange?.revision);
+  useEffect(() => {
+    if (!configurationChange || seenRevision.current === configurationChange.revision) return;
+    seenRevision.current = configurationChange.revision;
+    const current = latest.current;
+    if (current.query?.ratingScope === configurationChange.scope) void current.load(current.query);
+  }, [configurationChange]);
   return { ...state, load, retry: () => { if (state.query) void load(state.query); } };
 }
 
-export function useBuildingPerformanceCharts(siteId: string) {
-  const monthly = useChartRequest<BuildingPerformanceMonthlyQuery, Awaited<ReturnType<typeof BuildingPerformanceApi.getMonthlyPerformance>>>(BuildingPerformanceApi.getMonthlyPerformance, siteId);
-  const annual = useChartRequest<BuildingPerformanceAnnualQuery, Awaited<ReturnType<typeof BuildingPerformanceApi.getAnnualPerformance>>>(BuildingPerformanceApi.getAnnualPerformance, siteId);
-  const breakdown = useChartRequest<BuildingPerformanceEnergyBreakdownQuery, Awaited<ReturnType<typeof BuildingPerformanceApi.getEnergyBreakdown>>>(BuildingPerformanceApi.getEnergyBreakdown, siteId);
+export function useBuildingPerformanceCharts(siteId: string, configurationChange?: ConfigurationChange | null) {
+  const monthly = useChartRequest<BuildingPerformanceMonthlyQuery, Awaited<ReturnType<typeof BuildingPerformanceApi.getMonthlyPerformance>>>(BuildingPerformanceApi.getMonthlyPerformance, siteId, configurationChange);
+  const annual = useChartRequest<BuildingPerformanceAnnualQuery, Awaited<ReturnType<typeof BuildingPerformanceApi.getAnnualPerformance>>>(BuildingPerformanceApi.getAnnualPerformance, siteId, configurationChange);
+  const breakdown = useChartRequest<BuildingPerformanceEnergyBreakdownQuery, Awaited<ReturnType<typeof BuildingPerformanceApi.getEnergyBreakdown>>>(BuildingPerformanceApi.getEnergyBreakdown, siteId, configurationChange);
   return { monthly, annual, breakdown };
 }

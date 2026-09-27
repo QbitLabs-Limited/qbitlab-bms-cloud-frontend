@@ -1,3 +1,6 @@
+import { useRef, useState } from "react";
+import type { BuildingPerformanceRatingScope } from "@/types/buildingPerformance";
+import { BuildingPerformanceConfiguration } from "./BuildingPerformanceConfiguration";
 import { ArrowLeft } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { keycloak } from "@/keycloak";
@@ -27,6 +30,14 @@ function SiteBuildingPerformancePage({
 }: BuildingPerformancePageProps) {
   const navigate = useNavigate();
   const report = useBuildingPerformanceReport(siteId);
+  const latestReport = useRef(report);
+  latestReport.current = report;
+  const [configurationChange, setConfigurationChange] = useState<{ scope: BuildingPerformanceRatingScope; revision: number } | null>(null);
+  function configurationChanged(scope: BuildingPerformanceRatingScope) {
+    const current = latestReport.current;
+    if (current.applied?.ratingScope === scope) current.load(current.applied);
+    setConfigurationChange(previous => ({ scope, revision: (previous?.revision ?? 0) + 1 }));
+  }
   const canViewSites = ["ADMIN", "BMS_ADMIN", "TECHNICIAN"].some((role) =>
     keycloak.hasRealmRole(role)
   );
@@ -51,6 +62,7 @@ function SiteBuildingPerformancePage({
           <p className="mt-1 text-xs text-slate-400">Site ID: {siteId}</p>
         )}
       </BmsCard>
+      <BuildingPerformanceConfiguration siteId={siteId} onChanged={configurationChanged} />
       <BuildingPerformanceControls applied={report.applied} onLoad={report.load} />
       <BuildingPerformanceSummary state={report.summary} requested={report.applied !== null} onRetry={report.retrySummary} />
       <BuildingPerformanceReadiness state={report.readiness} requested={report.applied !== null} onRetry={report.retryReadiness} />
@@ -59,6 +71,7 @@ function SiteBuildingPerformancePage({
           key={JSON.stringify([siteId, report.applied])}
           siteId={siteId}
           applied={report.applied}
+          configurationChange={configurationChange}
         />
       )}
     </BmsPageShell>

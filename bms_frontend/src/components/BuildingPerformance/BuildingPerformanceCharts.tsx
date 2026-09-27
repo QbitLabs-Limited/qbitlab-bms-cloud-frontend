@@ -1,12 +1,12 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import { BmsButton, BmsCard, BmsInput, BmsSectionHeader, BmsSelect } from "@/components/UI";
-import type { BuildingPerformanceSummaryQuery, BuildingPerformanceEnergyBreakdownQuery, BuildingPerformancePeriodType } from "@/types/buildingPerformance";
+import type { BuildingPerformanceSummaryQuery, BuildingPerformanceEnergyBreakdownQuery, BuildingPerformancePeriodType, BuildingPerformanceRatingScope } from "@/types/buildingPerformance";
 import { useBuildingPerformanceCharts } from "./useBuildingPerformanceCharts";
 import { BuildingPerformanceTrendChart } from "./BuildingPerformanceTrendChart";
 import { BuildingPerformanceBreakdownChart } from "./BuildingPerformanceBreakdownChart";
 import { rangeError, validPeriod, type TrendPeriod } from "./buildingPerformanceChartData";
 
-type Props = { siteId: string; applied: BuildingPerformanceSummaryQuery };
+type Props = { siteId: string; applied: BuildingPerformanceSummaryQuery; configurationChange?: { scope: BuildingPerformanceRatingScope; revision: number } | null };
 
 function RangeControls({ kind, onLoad }: { kind: TrendPeriod; onLoad: (from: string, to: string) => void }) {
   const [from, setFrom] = useState("");
@@ -36,8 +36,8 @@ function ChartState({ loading, error, requested, hasData, retry, children }: { l
   return <>{children}</>;
 }
 
-export function BuildingPerformanceCharts({ siteId, applied }: Props) {
-  const charts = useBuildingPerformanceCharts(siteId);
+export function BuildingPerformanceCharts({ siteId, applied, configurationChange }: Props) {
+  const charts = useBuildingPerformanceCharts(siteId, configurationChange);
   const [periodType, setPeriodType] = useState<BuildingPerformancePeriodType>("ROLLING_12_MONTH");
   const [month, setMonth] = useState("");
   const [year, setYear] = useState("");
