@@ -3,18 +3,29 @@ import { useNavigate } from "react-router-dom";
 import { keycloak } from "@/keycloak";
 import { BmsButton, BmsCard, BmsPageShell, BmsSectionHeader } from "@/components/UI";
 
+import { BuildingPerformanceControls } from "./BuildingPerformanceControls";
+import { BuildingPerformanceSummary } from "./BuildingPerformanceSummary";
+import { BuildingPerformanceReadiness } from "./BuildingPerformanceReadiness";
+import { useBuildingPerformanceReport } from "./useBuildingPerformanceReport";
+
 type BuildingPerformancePageProps = {
   tenantId: string;
   siteId: string;
   siteName?: string;
 };
 
-export function BuildingPerformancePage({
+export function BuildingPerformancePage(props: BuildingPerformancePageProps) {
+  // Remount the report on site changes so inputs, requests, and results stay site-scoped.
+  return <SiteBuildingPerformancePage key={`${props.tenantId}:${props.siteId}`} {...props} />;
+}
+
+function SiteBuildingPerformancePage({
   tenantId,
   siteId,
   siteName,
 }: BuildingPerformancePageProps) {
   const navigate = useNavigate();
+  const report = useBuildingPerformanceReport(siteId);
   const canViewSites = ["ADMIN", "BMS_ADMIN", "TECHNICIAN"].some((role) =>
     keycloak.hasRealmRole(role)
   );
@@ -39,16 +50,9 @@ export function BuildingPerformancePage({
           <p className="mt-1 text-xs text-slate-400">Site ID: {siteId}</p>
         )}
       </BmsCard>
-      <BmsCard className="p-6">
-        <BmsSectionHeader
-          title="Building performance reporting"
-          subtitle="Performance reporting and configuration will be available in a future update."
-        />
-        <p className="text-sm leading-6 text-slate-300">
-          This page will bring together energy performance, data coverage,
-          rating readiness, building profiles, and energy meter assignments.
-        </p>
-      </BmsCard>
+      <BuildingPerformanceControls applied={report.applied} onLoad={report.load} />
+      <BuildingPerformanceSummary state={report.summary} requested={report.applied !== null} onRetry={report.retrySummary} />
+      <BuildingPerformanceReadiness state={report.readiness} requested={report.applied !== null} onRetry={report.retryReadiness} />
     </BmsPageShell>
   );
 }
