@@ -1,4 +1,4 @@
-name: Deploy Frontend to AWS EC2
+name: Deploy QbitLabs BMS Frontend to Production
 
 on:
   push:
@@ -6,22 +6,27 @@ on:
       - master
   workflow_dispatch:
 
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: qbitlabs-bms-frontend-production
+  cancel-in-progress: false
+
 env:
   AWS_REGION: ap-southeast-2
-  FRONTEND_ECR_REPOSITORY: bms-demo/frontend
-  IMAGE_TAG: latest
+  AWS_ACCOUNT_ID: '291634988956'
+  EC2_INSTANCE_ID: i-0afff33f0fb5a7a7c
+  ECR_REPOSITORY: qbitlabs-bms/frontend
 
 jobs:
   deploy:
-    name: Build Push Deploy Frontend
+    name: Build, Push and Deploy Frontend
     runs-on: ubuntu-latest
-
-    permissions:
-      id-token: write
-      contents: read
-
+    timeout-minutes: 45
     steps:
-      - name: Checkout frontend source code
+      - name: Checkout frontend source
         uses: actions/checkout@v4
 
       - name: Configure AWS credentials using OIDC
@@ -30,52 +35,160 @@ jobs:
           role-to-assume: ${{ secrets.AWS_GITHUB_ACTIONS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Login to Amazon ECR
-        id: login-ecr
+      - name: Verify AWS account
+        run: |
+          set -euo pipefail
+          test "$(aws sts get-caller-identity --query Account --output text)" = "$AWS_ACCOUNT_ID"
+
+      - name: Login to company ECR
+        id: ecr-login
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build frontend Docker image
+      - name: Build and push frontend image
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build \
-            --build-arg VITE_API_BASE_URL=https://bms.qbitlabsbms.com \
-            --build-arg VITE_KEYCLOAK_URL=https://bms.qbitlabsbms.com/auth \
-            -t ${{ env.FRONTEND_ECR_REPOSITORY }}:${{ env.IMAGE_TAG }} \
-            ./bms_frontend
-          
-      - name: Tag frontend image
+          set -euo pipefail
+          test "$ECR_REGISTRY" = "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
+          FRONTEND_IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          if aws ecr describe-images --repository-name "$ECR_REPOSITORY" \
+              --image-ids imageTag="$IMAGE_TAG" >/dev/null 2>&1; then
+            echo "Image tag already exists in immutable ECR repository; reusing existing image."
+          else
+            docker build \
+              --build-arg VITE_API_BASE_URL=https://bms.qbitlabsbms.com \
+              --build-arg VITE_KEYCLOAK_URL=https://bms.qbitlabsbms.com/auth \
+              -t "$FRONTEND_IMAGE" ./bms_frontend
+            docker push "$FRONTEND_IMAGE"
+          fi
+          echo "FRONTEND_IMAGE=$FRONTEND_IMAGE" >> "$GITHUB_ENV"
+
+      - name: Deploy frontend using SSM
+        env:
+          FRONTEND_IMAGE: ${{ env.FRONTEND_IMAGE }}
         run: |
-          docker tag \
-            ${{ env.FRONTEND_ECR_REPOSITORY }}:${{ env.IMAGE_TAG }} \
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.FRONTEND_ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64
+          import json
+          import os
 
-      - name: Push frontend image to ECR
-        run: |
-          docker push \
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.FRONTEND_ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+          image = os.environ['FRONTEND_IMAGE']
+          expected_prefix = '291634988956.dkr.ecr.ap-southeast-2.amazonaws.com/qbitlabs-bms/frontend:'
+          if not image.startswith(expected_prefix):
+              raise ValueError('Unexpected frontend image repository')
 
-      - name: Deploy frontend on EC2
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.AWS_EC2_HOST }}
-          username: ${{ secrets.AWS_EC2_USER }}
-          key: ${{ secrets.AWS_EC2_SSH_PRIVATE_KEY }}
-          port: 22
-          script: |
-            set -e
+          script = r'''#!/bin/bash
+          set -Eeuo pipefail
+          cd /opt/bms-demo
+          test -f .env
+          test -f docker-compose.prod.yml
+          COMPOSE=(docker compose --env-file .env -f docker-compose.prod.yml)
+          FRONTEND_IMAGE='__FRONTEND_IMAGE__'
+          BACKUP=$(mktemp /opt/bms-demo/.env.frontend.rollback.XXXXXX)
+          chmod 600 "$BACKUP"
+          cp -p .env "$BACKUP"
+          OLD_IMAGE=$(docker inspect --format '{{.Config.Image}}' bms-frontend)
+          OLD_IMAGE_ID=$(docker inspect --format '{{.Image}}' bms-frontend)
+          echo "Previous frontend image: $OLD_IMAGE"
+          docker image inspect "$OLD_IMAGE_ID" >/dev/null
+          docker tag "$OLD_IMAGE_ID" qbitlabs-frontend-rollback:previous
 
-            echo "Logging in to ECR..."
-            aws ecr get-login-password --region ap-southeast-2 | docker login --username AWS --password-stdin ${{ steps.login-ecr.outputs.registry }}
+          ready() {
+            local attempt code actual_health
+            for attempt in $(seq 1 18); do
+              code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 \
+                http://127.0.0.1:3000/health) || code=000
+              actual_health=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' bms-frontend 2>/dev/null || true)
+              if [ "$code" = 200 ] && [ "$actual_health" = healthy ]; then
+                echo "Frontend ready and Docker healthy (attempt $attempt)"
+                return 0
+              fi
+              echo "Frontend health attempt $attempt/18: HTTP $code, Docker $actual_health"
+              sleep 5
+            done
+            return 1
+          }
 
-            echo "Going to deployment folder..."
-            cd /opt/bms-demo
+          rollback() {
+            local failure=$?
+            trap - ERR
+            echo 'ERROR: Deployment failed; restoring previous frontend.'
+            cp -p "$BACKUP" .env || echo 'CRITICAL: Could not restore .env'
+            docker tag "$OLD_IMAGE_ID" "$OLD_IMAGE" || echo 'CRITICAL: Could not restore old image tag'
+            if ! "${COMPOSE[@]}" up -d --no-deps --force-recreate frontend; then
+              echo 'CRITICAL: Docker rollback failed'
+            else
+              actual=$(docker inspect --format '{{.Image}}' bms-frontend 2>/dev/null || true)
+              if [ "$actual" != "$OLD_IMAGE_ID" ]; then
+                echo 'CRITICAL: Rolled-back image ID differs from original'
+              elif ! ready; then
+                echo 'CRITICAL: Rolled-back frontend is not healthy'
+              else
+                echo 'Previous frontend image restored and healthy'
+              fi
+            fi
+            "${COMPOSE[@]}" ps frontend || true
+            exit "$failure"
+          }
+          trap rollback ERR
 
-            echo "Pulling latest frontend image..."
-            docker compose --env-file .env -f docker-compose.prod.yml pull frontend
+          aws ecr get-login-password --region ap-southeast-2 | \
+            docker login --username AWS --password-stdin \
+            291634988956.dkr.ecr.ap-southeast-2.amazonaws.com
+          docker pull "$FRONTEND_IMAGE"
+          sed -i '/^FRONTEND_IMAGE=/d' .env
+          printf 'FRONTEND_IMAGE=%s\n' "$FRONTEND_IMAGE" >> .env
+          "${COMPOSE[@]}" up -d --no-deps --force-recreate frontend
+          expected=$(docker image inspect --format '{{.Id}}' "$FRONTEND_IMAGE")
+          actual=$(docker inspect --format '{{.Image}}' bms-frontend)
+          if [ "$actual" != "$expected" ]; then
+            echo 'ERROR: Running frontend image does not match requested image'
+            false
+          fi
+          ready
+          echo 'Frontend deployment successful'
+          "${COMPOSE[@]}" ps frontend
+          trap - ERR
+          rm -f "$BACKUP"
+          '''
+          script = script.replace('__FRONTEND_IMAGE__', image)
+          command = 'echo ' + base64.b64encode(script.encode()).decode() + ' | base64 -d | bash'
+          with open('deploy-command.json', 'w', encoding='utf-8') as f:
+              json.dump({'commands': [command], 'executionTimeout': ['900']}, f)
+          PY
 
-            echo "Restarting frontend..."
-            docker compose --env-file .env -f docker-compose.prod.yml up -d frontend
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "$EC2_INSTANCE_ID" \
+            --document-name AWS-RunShellScript \
+            --comment 'Deploy QbitLabs production frontend' \
+            --parameters file://deploy-command.json \
+            --timeout-seconds 600 \
+            --query 'Command.CommandId' --output text)
+          echo "SSM command: $COMMAND_ID"
 
-            echo "Cleaning old unused Docker images..."
-            docker image prune -f
+          STATUS=Pending
+          for attempt in $(seq 1 180); do
+            STATUS=$(aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "$EC2_INSTANCE_ID" \
+              --query Status --output text 2>/dev/null) || STATUS=Pending
+            case "$STATUS" in
+              Success|Failed|Cancelled|TimedOut) break ;;
+            esac
+            echo "SSM status: $STATUS (attempt $attempt/180)"
+            sleep 10
+          done
 
-            echo "Frontend deployment completed."
+          aws ssm get-command-invocation \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$EC2_INSTANCE_ID" \
+            --query '{Status:Status,Output:StandardOutputContent,Error:StandardErrorContent}' \
+            --output json || true
+
+          if [ "$STATUS" != Success ]; then
+            echo "ERROR: SSM frontend deployment did not succeed (status: $STATUS)."
+            exit 1
+          fi
+          echo 'QbitLabs frontend deployment completed successfully.'
